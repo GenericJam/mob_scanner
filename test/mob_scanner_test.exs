@@ -81,7 +81,7 @@ defmodule MobScannerTest do
       # The Activity ships next to the bridge (same io.mob.scanner package);
       # it is launched by Intent from the bridge and must exist for the
       # host_requirements <activity> declaration to resolve.
-      assert File.exists?(Path.join(@plugin_dir, "priv/native/android/MobScannerActivity.kt"))
+      assert File.exists?(Path.join(@plugin_dir, "priv/native/android/MobScannerBridge.kt"))
     end
   end
 
