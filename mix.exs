@@ -1,0 +1,46 @@
+defmodule MobScanner.MixProject do
+  use Mix.Project
+
+  @source_url "https://github.com/GenericJam/mob_scanner"
+
+  def project do
+    [
+      app: :mob_scanner,
+      version: "0.1.0",
+      elixir: "~> 1.17",
+      deps: deps(),
+      description: "QR / barcode scanner for Mob apps (extracted from mob core)",
+      package: package(),
+      source_url: @source_url
+    ]
+  end
+
+  def application do
+    [extra_applications: [:logger]]
+  end
+
+  defp deps do
+    # Local path deps while the plugin system is dogfooded; switch :mob to the
+    # Hex constraint ("~> 0.6") when mob publishes. :mob_dev is test-only (the
+    # manifest tests run the real pre-publish validator) and never ships.
+    [
+      {:mob, path: "../mob"},
+      {:mob_dev, path: "../mob_dev", only: [:dev, :test], runtime: false},
+      # Code quality — Credo + ex_slop (AI-pattern checks) + jump_credo_checks,
+      # mirroring mob core's pre-commit gate.
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:ex_slop, "~> 0.4.2", only: [:dev, :test], runtime: false},
+      {:jump_credo_checks, "~> 0.1.0", only: [:dev, :test], runtime: false}
+    ]
+  end
+
+  defp package do
+    [
+      licenses: ["MIT"],
+      links: %{"GitHub" => @source_url},
+      # The native sources + manifest must ship in the package — the host's
+      # native build compiles them from deps/<plugin>/priv.
+      files: ~w(lib src priv mix.exs README* CHANGELOG* EXTRACTION*)
+    ]
+  end
+end
