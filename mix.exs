@@ -6,7 +6,7 @@ defmodule MobScanner.MixProject do
   def project do
     [
       app: :mob_scanner,
-      version: "0.1.0",
+      version: "0.1.1",
       elixir: "~> 1.17",
       deps: deps(),
       aliases: aliases(),
