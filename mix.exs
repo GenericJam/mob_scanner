@@ -6,7 +6,7 @@ defmodule MobScanner.MixProject do
   def project do
     [
       app: :mob_scanner,
-      version: "0.1.1",
+      version: "0.1.2",
       elixir: "~> 1.17",
       deps: deps(),
       aliases: aliases(),
@@ -36,6 +36,9 @@ defmodule MobScanner.MixProject do
     # Hex constraint ("~> 0.6") when mob publishes. :mob_dev is test-only (the
     # manifest tests run the real pre-publish validator) and never ships.
     [
+      {:ex_ast, "~> 0.12", only: [:dev, :test], runtime: false},
+      {:reach, "~> 2.7", only: [:dev, :test], runtime: false},
+      {:recon, "~> 2.5", only: [:dev, :test]},
       {:mob, "~> 0.7"},
       {:mob_dev, "~> 0.6", only: [:dev, :test], runtime: false},
       # Code quality — Credo + ex_slop (AI-pattern checks) + jump_credo_checks,
