@@ -38,12 +38,16 @@
     # (build.gradle.eex:122-133).
     gradle_deps: [
       "androidx.appcompat:appcompat:1.6.1",
-      # 1.6.1: 16 KB page-aligned libimage_processing_util_jni.so (fixed in
-      # CameraX 1.4.0+; kept in lockstep with mob_camera's gradle_deps — see
-      # mob/issues.md #6). 1.3.4 predates the fix.
-      "androidx.camera:camera-camera2:1.6.1",
-      "androidx.camera:camera-lifecycle:1.6.1",
-      "androidx.camera:camera-view:1.6.1",
+      # 1.4.2 (not the newer 1.6.1): 16 KB page-aligned
+      # libimage_processing_util_jni.so, fixed starting at CameraX 1.4.0 (see
+      # mob/issues.md #6) — 1.3.4 predates the fix. Deliberately NOT bumped to
+      # the current-stable 1.6.x line: 1.6.1 requires compileSdk 36 + AGP
+      # 8.9.1+ (device-build-verified failure against this toolchain's
+      # compileSdk 34 / AGP 8.2.0); 1.4.2 needs neither. Kept in lockstep with
+      # mob_camera's gradle_deps.
+      "androidx.camera:camera-camera2:1.4.2",
+      "androidx.camera:camera-lifecycle:1.4.2",
+      "androidx.camera:camera-view:1.4.2",
       # 17.3.0: 16 KB page-aligned libbarhopper_v3.so (the fix ships starting
       # at this version — see mob/issues.md #6). 17.2.0 predates it.
       "com.google.mlkit:barcode-scanning:17.3.0"
