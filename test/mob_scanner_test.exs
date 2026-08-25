@@ -43,10 +43,10 @@ defmodule MobScannerTest do
 
     test "carries the CameraX + ML Kit + AppCompat gradle deps moved out of the mob_new template",
          %{manifest: m} do
-      assert "com.google.mlkit:barcode-scanning:17.2.0" in m.android.gradle_deps
-      assert "androidx.camera:camera-camera2:1.3.4" in m.android.gradle_deps
-      assert "androidx.camera:camera-lifecycle:1.3.4" in m.android.gradle_deps
-      assert "androidx.camera:camera-view:1.3.4" in m.android.gradle_deps
+      assert "com.google.mlkit:barcode-scanning:17.3.0" in m.android.gradle_deps
+      assert "androidx.camera:camera-camera2:1.4.2" in m.android.gradle_deps
+      assert "androidx.camera:camera-lifecycle:1.4.2" in m.android.gradle_deps
+      assert "androidx.camera:camera-view:1.4.2" in m.android.gradle_deps
       assert "androidx.appcompat:appcompat:1.6.1" in m.android.gradle_deps
     end
 
