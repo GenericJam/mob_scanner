@@ -38,10 +38,15 @@
     # (build.gradle.eex:122-133).
     gradle_deps: [
       "androidx.appcompat:appcompat:1.6.1",
-      "androidx.camera:camera-camera2:1.3.4",
-      "androidx.camera:camera-lifecycle:1.3.4",
-      "androidx.camera:camera-view:1.3.4",
-      "com.google.mlkit:barcode-scanning:17.2.0"
+      # 1.6.1: 16 KB page-aligned libimage_processing_util_jni.so (fixed in
+      # CameraX 1.4.0+; kept in lockstep with mob_camera's gradle_deps — see
+      # mob/issues.md #6). 1.3.4 predates the fix.
+      "androidx.camera:camera-camera2:1.6.1",
+      "androidx.camera:camera-lifecycle:1.6.1",
+      "androidx.camera:camera-view:1.6.1",
+      # 17.3.0: 16 KB page-aligned libbarhopper_v3.so (the fix ships starting
+      # at this version — see mob/issues.md #6). 17.2.0 predates it.
+      "com.google.mlkit:barcode-scanning:17.3.0"
     ]
     # The scanner Activity itself is an AndroidManifest fragment the plugin
     # manifest can't yet contribute (same Stage-2 gap as mob_camera's
