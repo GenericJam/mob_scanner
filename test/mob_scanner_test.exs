@@ -109,6 +109,59 @@ defmodule MobScannerTest do
     end
   end
 
+  describe "Android JNI linkage" do
+    # A Kotlin `external fun` with no matching zig export throws
+    # UnsatisfiedLinkError the first time it runs. The terminal-status thunks
+    # (:not_available, :permission_denied) only run on failure paths a
+    # happy-path device scan never takes, so a missing export would ship.
+    @describetag :requires_zig
+    @describetag :tmp_dir
+
+    test "the bridge's Kotlin externals and the zig NIF's JNI exports are the same set",
+         %{tmp_dir: tmp} do
+      jni_dir = Path.join(Mix.Project.deps_paths()[:mob], "android/jni")
+      obj = Path.join(tmp, "mob_scanner_nif.o")
+
+      {out, status} =
+        System.cmd(
+          "zig",
+          [
+            "build-obj",
+            "-target",
+            "aarch64-linux-android",
+            "-femit-bin=#{obj}",
+            "--dep",
+            "erts",
+            "--dep",
+            "jni",
+            "-Mroot=" <> Path.join(@plugin_dir, "priv/native/jni/mob_scanner_nif.zig"),
+            "-Merts=" <> Path.join(jni_dir, "mob_erts.zig"),
+            "-Mjni=" <> Path.join(jni_dir, "mob_zig.zig")
+          ],
+          stderr_to_stdout: true
+        )
+
+      assert status == 0, out
+
+      {symbols, 0} = System.cmd("nm", ["-g", obj])
+
+      exported =
+        ~r/ T Java_io_mob_scanner_MobScannerBridge_(\w+)/
+        |> Regex.scan(symbols, capture: :all_but_first)
+        |> MapSet.new(&hd/1)
+
+      externals =
+        ~r/external fun (\w+)/
+        |> Regex.scan(
+          File.read!(Path.join(@plugin_dir, "priv/native/android/MobScannerBridge.kt")),
+          capture: :all_but_first
+        )
+        |> MapSet.new(&hd/1)
+
+      assert externals == exported
+    end
+  end
+
   describe "public API surface (extraction parity with old Mob.Scanner)" do
     test "exports the full extracted surface" do
       exports = MobScanner.__info__(:functions)

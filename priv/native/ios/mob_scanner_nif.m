@@ -7,20 +7,26 @@
  * Compiled as ObjC (-fobjc-arc) via the plugin objc-NIF path (manifest
  * lang: :objc).
  *
- * Delivered message shapes (exact core parity):
- *   not_available -> {scan, not_available}   (mob_nif.m:2957)
- *   cancelled     -> {scan, cancelled}       (mob_nif.m:2991)
- *   result        -> {scan, result, #{type => atom, value => binary}}
- *                    (mob_nif.m:3016-3031 — type as an ATOM, value as a
- *                    binary, delivered as direct Erlang terms; the Android
- *                    side goes through the {:mob_file_result, ...} JSON
- *                    path instead, decoded by core Mob.Screen into the
- *                    same user-facing tuple, lib/mob/screen.ex:382-384)
+ * Delivered message shapes:
+ *   not_available     -> {scan, not_available}     (mob_nif.m:2957 — no
+ *                        camera input could be opened)
+ *   permission_denied -> {scan, permission_denied} (MOB-292 — camera access
+ *                        denied/restricted, or refused at the prompt)
+ *   cancelled         -> {scan, cancelled}         (mob_nif.m:2991)
+ *   result            -> {scan, result, #{type => atom, value => binary}}
+ *                        (mob_nif.m:3016-3031 — type as an ATOM, value as a
+ *                        binary, delivered as direct Erlang terms; the Android
+ *                        side goes through the {:mob_file_result, ...} JSON
+ *                        path instead, decoded by core Mob.Screen into the
+ *                        same user-facing tuple, lib/mob/screen.ex:382-384)
  *
  * PARITY: core's nif_scanner_scan is arity 1 (mob_nif.m:6014) but ignores
  * the formats JSON argument — the metadataObjectTypes list is hardcoded
- * (mob_nif.m:2966-2971). Preserved exactly. The :camera permission flow is
- * NOT here — it is owned by the mob_camera plugin.
+ * (mob_nif.m:2966-2971). Preserved exactly. The :camera permission
+ * capability (registry handler + NSCameraUsageDescription) is owned by the
+ * mob_camera plugin; scan only reads the AVFoundation authorization status
+ * and, when it is still undetermined, asks for it before presenting — a
+ * session started before the grant stays black (MOB-292).
  */
 #import <AVFoundation/AVFoundation.h>
 #import <Foundation/Foundation.h>
@@ -53,6 +59,7 @@ static UIViewController *scan_root_vc(void) {
 
 @interface MobScannerVC : UIViewController <AVCaptureMetadataOutputObjectsDelegate>
 @property(nonatomic) ErlNifPid pid;
+@property(nonatomic, strong) AVCaptureDeviceInput *input;
 @property(nonatomic, strong) AVCaptureSession *session;
 @property(nonatomic, strong) AVCaptureVideoPreviewLayer *preview;
 @end
@@ -63,16 +70,8 @@ static MobScannerVC *g_scanner_vc = nil;
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor blackColor];
-    NSError *err = nil;
-    AVCaptureDevice *dev = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
-    AVCaptureDeviceInput *inp = [AVCaptureDeviceInput deviceInputWithDevice:dev error:&err];
-    if (!inp) {
-        scan_send2(&_pid, "scan", "not_available");
-        [self dismissViewControllerAnimated:YES completion:nil];
-        return;
-    }
     self.session = [[AVCaptureSession alloc] init];
-    [self.session addInput:inp];
+    [self.session addInput:self.input];
     AVCaptureMetadataOutput *out = [[AVCaptureMetadataOutput alloc] init];
     [self.session addOutput:out];
     [out setMetadataObjectsDelegate:self queue:dispatch_get_main_queue()];
@@ -146,14 +145,59 @@ static MobScannerVC *g_scanner_vc = nil;
 }
 @end
 
+// Main queue only. The camera input is opened before anything is presented,
+// so a missing/busy camera never flashes a black modal that has to be
+// dismissed mid-presentation.
+static void scan_present(ErlNifPid pid) {
+    AVCaptureDevice *dev = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
+    NSError *err = nil;
+    AVCaptureDeviceInput *inp =
+        dev ? [AVCaptureDeviceInput deviceInputWithDevice:dev error:&err] : nil;
+    if (!inp) {
+        NSLog(@"[MobScanner] no camera input (%@) -> {scan, not_available}", err);
+        scan_send2(&pid, "scan", "not_available");
+        return;
+    }
+    g_scanner_vc = [[MobScannerVC alloc] init];
+    g_scanner_vc.pid = pid;
+    g_scanner_vc.input = inp;
+    g_scanner_vc.modalPresentationStyle = UIModalPresentationFullScreen;
+    [scan_root_vc() presentViewController:g_scanner_vc animated:YES completion:nil];
+}
+
+static void scan_permission_denied(ErlNifPid pid, AVAuthorizationStatus status) {
+    NSLog(@"[MobScanner] camera authorization status %ld -> {scan, permission_denied}",
+          (long)status);
+    scan_send2(&pid, "scan", "permission_denied");
+}
+
 static ERL_NIF_TERM nif_scanner_scan(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
     ErlNifPid pid;
     enif_self(env, &pid);
     dispatch_async(dispatch_get_main_queue(), ^{
-      g_scanner_vc = [[MobScannerVC alloc] init];
-      g_scanner_vc.pid = pid;
-      g_scanner_vc.modalPresentationStyle = UIModalPresentationFullScreen;
-      [scan_root_vc() presentViewController:g_scanner_vc animated:YES completion:nil];
+      AVAuthorizationStatus status =
+          [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
+      switch (status) {
+      case AVAuthorizationStatusAuthorized:
+          scan_present(pid);
+          break;
+      case AVAuthorizationStatusNotDetermined:
+          // The completion runs on an arbitrary queue; UIKit + g_scanner_vc
+          // are main-queue only.
+          [AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo
+                                   completionHandler:^(BOOL granted) {
+                                     dispatch_async(dispatch_get_main_queue(), ^{
+                                       if (granted)
+                                           scan_present(pid);
+                                       else
+                                           scan_permission_denied(pid, AVAuthorizationStatusDenied);
+                                     });
+                                   }];
+          break;
+      default: // AVAuthorizationStatusDenied / AVAuthorizationStatusRestricted
+          scan_permission_denied(pid, status);
+          break;
+      }
     });
     return enif_make_atom(env, "ok");
 }

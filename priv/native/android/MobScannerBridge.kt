@@ -28,10 +28,14 @@
 // pendingScanPid static (MobBridge.kt.eex:1362).
 package io.mob.scanner
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.util.Log
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.ActivityResultRegistryOwner
+import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.contract.ActivityResultContracts
 import java.lang.ref.WeakReference
 import java.util.concurrent.atomic.AtomicLong
@@ -55,12 +59,20 @@ import com.google.mlkit.vision.common.InputImage
 import java.util.concurrent.Executors
 
 object MobScannerBridge : io.mob.plugin.MobActivityAware {
+    private const val TAG = "MobScanner"
+
     private var activityRef: WeakReference<Activity>? = null
 
     @JvmStatic external fun nativeRegister()
 
     // {:scan, :cancelled}
     @JvmStatic external fun nativeDeliverScanCancelled(pid: Long)
+
+    // {:scan, :not_available} — the scanner Activity could not be launched.
+    @JvmStatic external fun nativeDeliverScanNotAvailable(pid: Long)
+
+    // {:scan, :permission_denied} — :camera refused.
+    @JvmStatic external fun nativeDeliverScanPermissionDenied(pid: Long)
 
     // {:mob_file_result, "scan", "result", json} — decoded by core
     // Mob.Screen into {:scan, :result, %{type: atom, value: binary}}
@@ -83,6 +95,11 @@ object MobScannerBridge : io.mob.plugin.MobActivityAware {
     // PARITY: formatsJson is accepted but ignored, exactly like core
     // (MobBridge.kt.eex:1361-1365) — MobScannerActivity scans all ML Kit
     // formats regardless.
+    //
+    // Called on a BEAM scheduler thread. Everything past the activity lookup
+    // hops to the UI thread: ActivityResultRegistry.register()/launch() belong
+    // there (same as mob_camera's launchCapture), and an exception thrown on
+    // the NIF thread is uncaught and kills the whole process (MOB-293).
     @JvmStatic
     fun scanner_scan(
         pid: Long,
@@ -93,27 +110,107 @@ object MobScannerBridge : io.mob.plugin.MobActivityAware {
                 nativeDeliverScanCancelled(pid)
                 return
             }
-        val owner =
-            activity as? ActivityResultRegistryOwner ?: run {
-                nativeDeliverScanCancelled(pid)
-                return
+        activity.runOnUiThread {
+            val owner =
+                activity as? ActivityResultRegistryOwner ?: run {
+                    nativeDeliverScanCancelled(pid)
+                    return@runOnUiThread
+                }
+            val granted =
+                ContextCompat.checkSelfPermission(activity, Manifest.permission.CAMERA) ==
+                    PackageManager.PERMISSION_GRANTED
+            if (granted) {
+                launchScanner(activity, owner, pid)
+            } else {
+                requestCameraThenScan(activity, owner, pid)
             }
+        }
+    }
+
+    // MOB-292 parity with iOS: an undecided :camera permission is requested
+    // here instead of opening a preview CameraX can't feed. A permanently
+    // denied permission resolves to granted=false without showing a dialog.
+    private fun requestCameraThenScan(
+        activity: Activity,
+        owner: ActivityResultRegistryOwner,
+        pid: Long,
+    ) {
+        launchForResult(
+            activity,
+            owner,
+            pid,
+            ActivityResultContracts.RequestPermission(),
+            Manifest.permission.CAMERA,
+        ) { granted ->
+            if (granted) {
+                launchScanner(activity, owner, pid)
+            } else {
+                Log.w(TAG, "scan: android.permission.CAMERA denied")
+                nativeDeliverScanPermissionDenied(pid)
+            }
+        }
+    }
+
+    private fun launchScanner(
+        activity: Activity,
+        owner: ActivityResultRegistryOwner,
+        pid: Long,
+    ) {
+        launchForResult(
+            activity,
+            owner,
+            pid,
+            ActivityResultContracts.StartActivityForResult(),
+            Intent(activity, MobScannerActivity::class.java),
+        ) { result ->
+            // Same extras contract as core (MainActivity.kt.eex:55-58):
+            // MobScannerActivity returns scan_value/scan_type Intent
+            // extras on RESULT_OK, nothing on RESULT_CANCELED.
+            val value = result.data?.getStringExtra("scan_value")
+            val type = result.data?.getStringExtra("scan_type") ?: "qr"
+            handleScanResult(pid, value, type)
+        }
+    }
+
+    // Registers a one-shot launcher, launches it, and unregisters it when the
+    // result arrives. A launch that throws (ActivityNotFoundException when the
+    // <activity> isn't in the host manifest, IllegalStateException, a
+    // SecurityException, ...) is terminal for this scan, never for the app:
+    // the launcher is unregistered, the cause goes to logcat, and the caller
+    // gets {:scan, :not_available} (MOB-293).
+    //
+    // The launch runs from a posted UI-thread block (or a result callback), so
+    // the Activity captured at scanner_scan time may be finishing, destroyed,
+    // or replaced by then. Its registry would never dispatch a result — the
+    // scan would get no terminal message — so it is rejected before anything
+    // is registered, with the same {:scan, :not_available}.
+    private fun <I, O> launchForResult(
+        activity: Activity,
+        owner: ActivityResultRegistryOwner,
+        pid: Long,
+        contract: ActivityResultContract<I, O>,
+        input: I,
+        onResult: (O) -> Unit,
+    ) {
+        if (activity.isFinishing || activity.isDestroyed || activityRef?.get() !== activity) {
+            Log.w(TAG, "scan: host Activity finishing/destroyed/replaced, delivering {:scan, :not_available}")
+            nativeDeliverScanNotAvailable(pid)
+            return
+        }
         val key = "mob_scanner_${scanSeq.incrementAndGet()}"
-        var launcher: ActivityResultLauncher<Intent>? = null
-        launcher =
-            owner.activityResultRegistry.register(
-                key,
-                ActivityResultContracts.StartActivityForResult(),
-            ) { result ->
-                // Same extras contract as core (MainActivity.kt.eex:55-58):
-                // MobScannerActivity returns scan_value/scan_type Intent
-                // extras on RESULT_OK, nothing on RESULT_CANCELED.
-                val value = result.data?.getStringExtra("scan_value")
-                val type = result.data?.getStringExtra("scan_type") ?: "qr"
-                handleScanResult(pid, value, type)
-                launcher?.unregister()
-            }
-        launcher.launch(Intent(activity, MobScannerActivity::class.java))
+        var launcher: ActivityResultLauncher<I>? = null
+        try {
+            launcher =
+                owner.activityResultRegistry.register(key, contract) { output ->
+                    launcher?.unregister()
+                    onResult(output)
+                }
+            launcher.launch(input)
+        } catch (e: RuntimeException) {
+            launcher?.unregister()
+            Log.e(TAG, "scan: launching $key failed, delivering {:scan, :not_available}", e)
+            nativeDeliverScanNotAvailable(pid)
+        }
     }
 
     // Result processing copied from core MobBridge.handleScanResult

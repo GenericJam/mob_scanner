@@ -24,7 +24,8 @@ config :mob, :plugins, [:mob_camera, :mob_scanner]
 ```
 
 Request `:camera` via `Mob.Permissions.request(socket, :camera)` before
-scanning.
+scanning. If it is still undecided when `scan/2` runs, the scanner shows the
+system prompt itself and opens once it is granted.
 
 ## Usage
 
@@ -33,7 +34,11 @@ socket = MobScanner.scan(socket, formats: [:qr])
 
 def handle_info({:scan, :result, %{type: :qr, value: value}}, socket), do: ...
 def handle_info({:scan, :cancelled}, socket), do: ...
-# iOS additionally delivers {:scan, :not_available} when no camera input can be opened
+# camera access denied/restricted or refused at the prompt; nothing was shown
+def handle_info({:scan, :permission_denied}, socket), do: ...
+# the scanner couldn't open (iOS: no camera input; Android: activity launch
+# failed or the host Activity was going away — cause in logcat, MobScanner tag)
+def handle_info({:scan, :not_available}, socket), do: ...
 ```
 
 Formats: `:qr`, `:ean13`, `:ean8`, `:code128`, `:code39`, `:upca`, `:upce`,
