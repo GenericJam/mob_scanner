@@ -150,16 +150,12 @@ object MobScannerBridge : io.mob.plugin.MobActivityAware {
 // returns the scanned value/type as scan_value / scan_type Intent extras
 // (RESULT_OK) or RESULT_CANCELED.
 //
-// NOTE: as an Activity this class still needs an AndroidManifest
-// declaration the plugin manifest can't contribute — see host_requirements
-// in priv/mob_plugin.exs:
-//   <activity android:name="io.mob.scanner.MobScannerActivity"
-//       android:exported="false"
-//       android:theme="@style/Theme.AppCompat.NoActionBar" />
-// The AppCompat theme override is required: this extends AppCompatActivity
-// (CameraX + ML Kit need it), which throws IllegalStateException at
-// setContentView when the activity's theme isn't AppCompat-derived
-// (mob_new AndroidManifest.xml.eex:78-87).
+// The AndroidManifest declaration comes from this plugin's manifest
+// (android.manifest_application_snippets in priv/mob_plugin.exs), spliced
+// into the host <application> by `mix mob.deploy --native`. The AppCompat
+// theme it sets is required: this extends AppCompatActivity (CameraX + ML
+// Kit need it), which throws IllegalStateException at setContentView when
+// the activity's theme isn't AppCompat-derived.
 class MobScannerActivity : AppCompatActivity() {
     private val executor = Executors.newSingleThreadExecutor()
     private var scanHandled = false

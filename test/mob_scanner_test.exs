@@ -56,18 +56,16 @@ defmodule MobScannerTest do
       refute Map.has_key?(m.ios, :plist_keys)
     end
 
-    test "host_requirements cover the <activity> declaration and the mob_camera dependency",
+    test "contributes the scanner <activity> with an AppCompat theme to the host manifest",
          %{manifest: m} do
-      assert [_ | _] = m.host_requirements
+      assert [snippet] = m.android.manifest_application_snippets
+      assert snippet =~ ~s(android:name="io.mob.scanner.MobScannerActivity")
+      assert snippet =~ ~s(android:exported="false")
+      assert snippet =~ "Theme.AppCompat.NoActionBar"
+    end
 
-      assert Enum.any?(m.host_requirements, fn req ->
-               req =~ ~s(android:name="io.mob.scanner.MobScannerActivity") and
-                 req =~ "Theme.AppCompat.NoActionBar"
-             end)
-
-      assert Enum.any?(m.host_requirements, fn req ->
-               req =~ "mob_camera" and req =~ ":camera"
-             end)
+    test "host_requirements keep the mob_camera dependency reminder", %{manifest: m} do
+      assert Enum.any?(m.host_requirements, &(&1 =~ "mob_camera" and &1 =~ ":camera"))
     end
 
     test "every native source dir + Kotlin bridge + scanner Activity the manifest references exists",
@@ -80,7 +78,7 @@ defmodule MobScannerTest do
 
       # The Activity ships next to the bridge (same io.mob.scanner package);
       # it is launched by Intent from the bridge and must exist for the
-      # host_requirements <activity> declaration to resolve.
+      # contributed <activity> declaration to resolve.
       assert File.exists?(Path.join(@plugin_dir, "priv/native/android/MobScannerBridge.kt"))
     end
   end
