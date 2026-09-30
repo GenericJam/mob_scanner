@@ -21,8 +21,8 @@ defmodule MobScanner do
 
   iOS: `AVCaptureMetadataOutput`. Android: `CameraX` + ML Kit
   `BarcodeScanning` in a plugin-owned full-screen Activity
-  (`io.mob.scanner.MobScannerActivity`) — the host AndroidManifest must
-  declare it (see `host_requirements` in `priv/mob_plugin.exs`).
+  (`io.mob.scanner.MobScannerActivity`), declared in the host manifest by
+  the native build from this plugin's manifest.
   """
 
   @type format ::

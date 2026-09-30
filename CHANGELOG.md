@@ -6,6 +6,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **Android: first scan crashed the app with `ActivityNotFoundException`.**
+  mob_new ≥ 0.4.0 stopped declaring `io.mob.scanner.MobScannerActivity` in the
+  generated `AndroidManifest.xml` (the scanner moved into this plugin), and the
+  plugin only printed a `host_requirements` reminder, so every freshly
+  generated app crashed at the first `MobScanner.scan/2`. The manifest now
+  contributes the `<activity>` (AppCompat theme) via
+  `android.manifest_application_snippets`; the native build splices it in and
+  skips it when the host already declares it. Requires mob_dev ≥ 0.6.19.
+
 ## [0.1.2] - 2026-08-25
 
 ### Fixed

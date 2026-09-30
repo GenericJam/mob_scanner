@@ -41,19 +41,10 @@ Formats: `:qr`, `:ean13`, `:ean8`, `:code128`, `:code39`, `:upca`, `:upce`,
 
 ## Host app requirements
 
-`AndroidManifest.xml` must declare the scanner activity inside
-`<application>` (mob_new-generated apps already include it):
-
-```xml
-<activity android:name="io.mob.scanner.MobScannerActivity"
-          android:exported="false"
-          android:theme="@style/Theme.AppCompat.NoActionBar" />
-```
-
-Without the declaration the app builds and boots fine, then throws
-`ActivityNotFoundException` at first scan. The AppCompat theme is required —
-`MobScannerActivity` extends `AppCompatActivity` and throws
-`IllegalStateException` at `setContentView` under a non-AppCompat theme.
+None beyond activating `mob_camera` (above). The scanner `<activity>`
+(`io.mob.scanner.MobScannerActivity`, AppCompat theme) is contributed to the
+host `AndroidManifest.xml` by `mix mob.deploy --native` (needs mob_dev ≥ 0.6.19).
+A hand-declared copy from an older setup is detected and not doubled.
 
 ## Limits
 

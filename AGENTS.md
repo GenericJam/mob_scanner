@@ -19,11 +19,11 @@ A single-purpose scanning surface. `MobScanner.scan/2` calls into `:mob_scanner_
 ## Anatomy of the plugin
 
 * `lib/mob_scanner.ex` — the entire public API: `MobScanner.scan/2` + the `format` type. Delivered-message shapes are documented here canonically.
-* `priv/mob_plugin.exs` — plugin manifest. `nifs` split by `platform:` (`:ios` compiles `.m` with `-fobjc-arc`, `:android` compiles the sibling `.zig`). No `:permissions` capability — that's mob_camera's. iOS `frameworks: ["AVFoundation"]`; Android `bridge_class: "io.mob.scanner.MobScannerBridge"` + CameraX / ML Kit `gradle_deps` kept in lockstep with mob_camera. `host_requirements` prints the two manual host-app steps on every native build.
+* `priv/mob_plugin.exs` — plugin manifest. `nifs` split by `platform:` (`:ios` compiles `.m` with `-fobjc-arc`, `:android` compiles the sibling `.zig`). No `:permissions` capability — that's mob_camera's. iOS `frameworks: ["AVFoundation"]`; Android `bridge_class: "io.mob.scanner.MobScannerBridge"` + CameraX / ML Kit `gradle_deps` kept in lockstep with mob_camera + the scanner `<activity>` via `manifest_application_snippets` (spliced into the host manifest by the native build). `host_requirements` prints the mob_camera reminder on every native build.
 * `priv/native/ios/mob_scanner_nif.m` — Objective-C NIF. Extracted from `mob-core ios/mob_nif.m:2939-3046`; ships its own `scan_send2` / `scan_root_vc` because core's equivalents are private statics.
 * `priv/native/jni/mob_scanner_nif.zig` — Zig NIF. Extracted from core's `mob_nif.zig` scanner paths; reaches ERTS / JNI via `@import("erts")` / `@import("jni")`, links against `get_jenv` / `g_jvm` exported from mob core into the same `.so`.
 * `priv/native/android/MobScannerBridge.kt` — Kotlin bridge. Registers directly on the ComponentActivity's `ActivityResultRegistry` (a late-bound plugin can't reference the generated `MainActivity`); launches `MobScannerActivity`; the pid travels through the closure, not through core's static `pendingScanPid`.
-* `priv/native/android/MobScannerActivity.kt` — the full-screen scanner Activity. `AppCompatActivity` subclass (CameraX PreviewView + ML Kit want an AppCompat context).
+* `MobScannerActivity` — the full-screen scanner Activity, a second top-level class in `MobScannerBridge.kt` (the bridge_kt channel copies one file per plugin). `AppCompatActivity` subclass (CameraX PreviewView + ML Kit want an AppCompat context).
 * `test/mob_scanner_test.exs` — Elixir suite. Manifest validation via `MobDev.Plugin.{Manifest, Validator}`.
 
 ## Cross-repo work
@@ -56,7 +56,7 @@ Coverage priorities as issues land:
 
 2. **The `formats:` option is passed through but currently ignored by both native sides.** iOS hardcodes `metadataObjectTypes` (`ios/mob_scanner_nif.m` / core `mob_nif.m:2966-2971`); Android scans all default ML Kit formats. This is **preserved core-parity behaviour**, not a bug — the argument is encoded and shipped so honoring it later is a non-breaking change. Do not write docs that promise per-format filtering until the native side actually filters.
 
-3. **The scanner Activity is a host-manifest fragment the plugin can't yet contribute.** `AndroidManifest.xml` must declare `<activity android:name="io.mob.scanner.MobScannerActivity" android:exported="false" android:theme="@style/Theme.AppCompat.NoActionBar" />` inside `<application>`. Without the declaration the app builds + boots and then throws `ActivityNotFoundException` at first scan. Without the AppCompat theme, `setContentView` throws `IllegalStateException`. mob_new-generated apps already include this; hand-rolled hosts do not.
+3. **The scanner Activity is contributed by the manifest, not the host.** `priv/mob_plugin.exs` `android.manifest_application_snippets` carries `<activity android:name="io.mob.scanner.MobScannerActivity" android:exported="false" android:theme="@style/Theme.AppCompat.NoActionBar" />`; the native build splices it into the host's `<application>`. Don't move it back to `host_requirements`: mob_new ≥ 0.4.0 stopped declaring it, and a reminder-only requirement shipped an app that built, booted, and crashed with `ActivityNotFoundException` at first scan. Without the AppCompat theme, `setContentView` throws `IllegalStateException`.
 
 4. **Delivered-message shapes are core-parity — don't drift.** iOS sends direct Erlang terms; Android sends `{:mob_file_result, ...}` that core decodes. If you change one side, either change both platforms *and* the core decoder in the same PR, or document why the asymmetry is deliberate (as it is today).
 

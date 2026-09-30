@@ -51,13 +51,20 @@
       # 17.3.0: 16 KB page-aligned libbarhopper_v3.so (the fix ships starting
       # at this version — see mob/issues.md #6). 17.2.0 predates it.
       "com.google.mlkit:barcode-scanning:17.3.0"
+    ],
+    # The scanner Activity (class ships in MobScannerBridge.kt). Spliced into
+    # the host's <application> by the native build (mob_dev >= 0.6.19); a
+    # hand-declared copy is detected by android:name and not doubled. The
+    # AppCompat theme is required: MobScannerActivity extends
+    # AppCompatActivity and throws IllegalStateException at setContentView
+    # under a non-AppCompat theme.
+    manifest_application_snippets: [
+      """
+      <activity android:name="io.mob.scanner.MobScannerActivity"
+          android:exported="false"
+          android:theme="@style/Theme.AppCompat.NoActionBar" />
+      """
     ]
-    # The scanner Activity itself is an AndroidManifest fragment the plugin
-    # manifest can't yet contribute (same Stage-2 gap as mob_camera's
-    # FileProvider / mob_screencast's <service>). Declared in
-    # :host_requirements below so every native build reminds the host
-    # author; the MobScannerActivity.kt class DOES ship in this plugin
-    # (priv/native/android/MobScannerActivity.kt, package io.mob.scanner).
   },
   # AVCaptureSession / AVCaptureMetadataOutput / AVCaptureVideoPreviewLayer
   # all live in AVFoundation; UIKit/Foundation are implicit. No plist_keys —
@@ -66,16 +73,8 @@
   # would collide in the plist merge.
   ios: %{frameworks: ["AVFoundation"]},
   # Manual host-app steps the build can't automate; printed as a warning on
-  # every `mix mob.deploy --native` of the host. mob_new-generated apps
-  # already satisfy the <activity> via their template AndroidManifest.
+  # every `mix mob.deploy --native` of the host.
   host_requirements: [
-    "AndroidManifest.xml must declare the scanner activity inside <application>: " <>
-      ~s(<activity android:name="io.mob.scanner.MobScannerActivity" ) <>
-      ~s(android:exported="false" android:theme="@style/Theme.AppCompat.NoActionBar" />) <>
-      " — MobScannerActivity extends AppCompatActivity (CameraX + ML Kit need it) and " <>
-      "throws IllegalStateException at setContentView under a non-AppCompat theme; " <>
-      "without the declaration the app builds + boots fine and throws " <>
-      "ActivityNotFoundException at first scan.",
     "The :camera runtime permission is owned by the mob_camera plugin — activate " <>
       "mob_camera alongside mob_scanner and request :camera via Mob.Permissions " <>
       "before scanning (mob_camera also carries the iOS NSCameraUsageDescription " <>
