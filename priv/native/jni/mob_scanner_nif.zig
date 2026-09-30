@@ -8,11 +8,16 @@
 //! BarcodeScanning) and feeds its Intent result back. Scan results arrive
 //! back via the exported deliver thunks.
 //!
-//! Delivered message shapes (exact core parity):
+//! Delivered message shapes:
 //!   * cancelled -> {:scan, :cancelled}
 //!     (core: Kotlin nativeDeliverAtom2(pid, "scan", "cancelled"),
 //!     MobBridge.kt.eex:1364 + 1370, and the cancelled branch of
 //!     mob_deliver_file_result, mob_nif.zig:2283-2285)
+//!   * not_available     -> {:scan, :not_available}      (MOB-293: the
+//!     scanner Activity could not be launched; iOS sends the same atom when
+//!     no camera input opens)
+//!   * permission_denied -> {:scan, :permission_denied}  (MOB-292: :camera
+//!     refused or not grantable)
 //!   * result    -> {:mob_file_result, "scan", "result", json_binary}
 //!     (core: Kotlin nativeDeliverFileResult(pid, "scan", "result", json),
 //!     MobBridge.kt.eex:1374, into mob_deliver_file_result's non-cancelled
@@ -85,6 +90,14 @@ fn callBridgePidStr(env: ?*erts.ErlNifEnv, method: jni.JMethodID, pid: erts.ErlN
 
 // ── Inbound delivery thunks ───────────────────────────────────────────────
 
+fn sendScanStatus(pid_long: jni.JLong, comptime status: [:0]const u8) void {
+    var pid = pidFromLong(pid_long);
+    const env = erts.enif_alloc_env() orelse return;
+    defer erts.enif_free_env(env);
+    const msg = erts.makeTuple(env, .{ erts.atom(env, "scan"), erts.atom(env, status) });
+    _ = erts.enif_send(null, &pid, env, msg);
+}
+
 // {:scan, :cancelled} — parity with core's cancelled delivery
 // (nativeDeliverAtom2(pid, "scan", "cancelled"), MobBridge.kt.eex:1364+1370,
 // and the cancelled branch of mob_deliver_file_result, mob_nif.zig:2283-2285).
@@ -95,11 +108,29 @@ export fn Java_io_mob_scanner_MobScannerBridge_nativeDeliverScanCancelled(
 ) callconv(.c) void {
     _ = jenv;
     _ = cls;
-    var pid = pidFromLong(pid_long);
-    const env = erts.enif_alloc_env() orelse return;
-    defer erts.enif_free_env(env);
-    const msg = erts.makeTuple(env, .{ erts.atom(env, "scan"), erts.atom(env, "cancelled") });
-    _ = erts.enif_send(null, &pid, env, msg);
+    sendScanStatus(pid_long, "cancelled");
+}
+
+// {:scan, :not_available} — the scanner Activity could not be launched.
+export fn Java_io_mob_scanner_MobScannerBridge_nativeDeliverScanNotAvailable(
+    jenv: *jni.JNIEnv,
+    cls: jni.JClass,
+    pid_long: jni.JLong,
+) callconv(.c) void {
+    _ = jenv;
+    _ = cls;
+    sendScanStatus(pid_long, "not_available");
+}
+
+// {:scan, :permission_denied} — the :camera runtime permission was refused.
+export fn Java_io_mob_scanner_MobScannerBridge_nativeDeliverScanPermissionDenied(
+    jenv: *jni.JNIEnv,
+    cls: jni.JClass,
+    pid_long: jni.JLong,
+) callconv(.c) void {
+    _ = jenv;
+    _ = cls;
+    sendScanStatus(pid_long, "permission_denied");
 }
 
 // {:mob_file_result, "scan", "result", json_binary} — EXACT replica of

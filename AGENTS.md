@@ -8,7 +8,7 @@ You're in **mob_scanner**, a Mob plugin whose only surface is a full-screen scan
 
 ## What mob_scanner is, in one paragraph
 
-A single-purpose scanning surface. `MobScanner.scan/2` calls into `:mob_scanner_nif` which pushes a full-screen view controller (iOS: `MobScannerVC` wrapping `AVCaptureMetadataOutput`) or launches a full-screen activity (Android: plugin-owned `io.mob.scanner.MobScannerActivity`, CameraX + ML Kit `BarcodeScanning`). Detection dismisses the surface. iOS delivers the result as direct Erlang terms `{:scan, :result, %{type: atom, value: binary}}`; Android delivers a `{:mob_file_result, "scan", "result", json_binary}` tuple that mob core's `Mob.Screen` server decodes into the same user-facing shape (`lib/mob/screen/server.ex:732-741`). Cancellation reaches the caller as `{:scan, :cancelled}` on both platforms; iOS additionally sends `{:scan, :not_available}` when no camera input can be opened.
+A single-purpose scanning surface. `MobScanner.scan/2` calls into `:mob_scanner_nif` which pushes a full-screen view controller (iOS: `MobScannerVC` wrapping `AVCaptureMetadataOutput`) or launches a full-screen activity (Android: plugin-owned `io.mob.scanner.MobScannerActivity`, CameraX + ML Kit `BarcodeScanning`). Detection dismisses the surface. iOS delivers the result as direct Erlang terms `{:scan, :result, %{type: atom, value: binary}}`; Android delivers a `{:mob_file_result, "scan", "result", json_binary}` tuple that mob core's `Mob.Screen` server decodes into the same user-facing shape (`lib/mob/screen/server.ex:732-741`). The other terminal messages are direct `{:scan, atom}` tuples on both platforms: `:cancelled` (closed without a code), `:permission_denied` (camera access denied/restricted or refused at the prompt — nothing is presented; MOB-292), and `:not_available` (the scanner couldn't open: iOS found no camera input, Android failed to launch the Activity — cause logged under the `MobScanner` logcat tag; MOB-293).
 
 ## What mob_scanner is NOT
 
@@ -52,7 +52,7 @@ Coverage priorities as issues land:
 
 ## The pre-empt-failure rules that matter here
 
-1. **You need mob_camera activated too.** If mob_scanner is added without mob_camera, iOS builds fine and then dies at first scan (no `NSCameraUsageDescription`), and Android builds fine and then throws at CameraX bind time (`:camera` permission never requested because no `MobPermissionProvider` maps it). Both failures look like scanner bugs and aren't. The host README and every `mob_plugin.exs :host_requirements` entry says this — don't quietly drop that reminder.
+1. **You need mob_camera activated too.** If mob_scanner is added without mob_camera, iOS builds fine and then dies at first scan (no `NSCameraUsageDescription` — the scanner's own `requestAccessForMediaType:` for an undecided status needs it too). Android works standalone for the permission itself (the bridge requests `android.permission.CAMERA` when it isn't granted), but the `:camera` capability for `Mob.Permissions` still only exists via mob_camera. The host README and every `mob_plugin.exs :host_requirements` entry says this — don't quietly drop that reminder.
 
 2. **The `formats:` option is passed through but currently ignored by both native sides.** iOS hardcodes `metadataObjectTypes` (`ios/mob_scanner_nif.m` / core `mob_nif.m:2966-2971`); Android scans all default ML Kit formats. This is **preserved core-parity behaviour**, not a bug — the argument is encoded and shipped so honoring it later is a non-breaking change. Do not write docs that promise per-format filtering until the native side actually filters.
 
@@ -60,7 +60,9 @@ Coverage priorities as issues land:
 
 4. **Delivered-message shapes are core-parity — don't drift.** iOS sends direct Erlang terms; Android sends `{:mob_file_result, ...}` that core decodes. If you change one side, either change both platforms *and* the core decoder in the same PR, or document why the asymmetry is deliberate (as it is today).
 
-5. **`:camera` permission belongs to mob_camera; keep it there.** It is very tempting, when a user hits "camera not permitted", to add a `:permissions` entry to `priv/mob_plugin.exs` here so mob_scanner "just works" standalone. Don't. That double-registers the handler on iOS. Instead, fix mob_camera's permission flow or the docs that point users at it.
+5. **`:camera` permission belongs to mob_camera; keep it there.** It is very tempting, when a user hits "camera not permitted", to add a `:permissions` entry to `priv/mob_plugin.exs` here so mob_scanner "just works" standalone. Don't. That double-registers the handler on iOS. Instead, fix mob_camera's permission flow or the docs that point users at it. What `scan/2` does itself is narrower and deliberate (MOB-292): read the OS authorization status, prompt only when it is undecided, and otherwise deliver `{:scan, :permission_denied}` *before* presenting anything — a capture session started without the grant renders a black preview until cancel.
+
+6. **Nothing the bridge launches may throw on the caller's thread, or silently die.** `scanner_scan` runs on a BEAM scheduler thread; any exception escaping it (or the UI-thread block it posts) is uncaught and kills the whole app process. Registry register/launch goes through `launchForResult`, which first rejects a host Activity that is finishing, destroyed, or no longer the current `activityRef` (its registry would never dispatch a result, leaving the scan without a terminal message), then catches, unregisters, logs, and delivers `{:scan, :not_available}` for either case (MOB-293). Route new launches through it.
 
 ## Pre-commit checklist
 

@@ -6,6 +6,32 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **iOS: scanning before `:camera` was granted left a black preview until
+  Cancel** (MOB-292). `scan/2` now checks the AVFoundation authorization
+  status before presenting: undecided → shows the system prompt and opens the
+  scanner once granted; denied/restricted (or refused at the prompt) → delivers
+  the new `{:scan, :permission_denied}` without presenting anything. The camera
+  input is also opened before presenting, so `{:scan, :not_available}` no
+  longer comes from a modal that has to dismiss itself mid-presentation.
+- **Android: an exception launching the scanner killed the whole app process**
+  (MOB-293). `scanner_scan` threw `ActivityNotFoundException` (e.g. no
+  `MobScannerActivity` in the host manifest) on the NIF-calling thread,
+  uncaught. Registration and launch now run on the UI thread inside a guard
+  that unregisters the launcher, logs the cause under the `MobScanner` logcat
+  tag, and delivers `{:scan, :not_available}`. A host Activity that is
+  finishing, destroyed, or replaced by the time the queued launch runs is
+  rejected before anything is registered, with the same message.
+
+### Changed
+- **New terminal messages screens should handle:** `{:scan, :permission_denied}`
+  (both platforms) and `{:scan, :not_available}` (now also on Android). Android
+  mirrors the iOS permission flow: if `android.permission.CAMERA` isn't granted,
+  `scan/2` requests it and opens the scanner on grant, or delivers
+  `{:scan, :permission_denied}` on refusal.
+
 ## [0.1.4] - 2026-09-30
 
 ### Changed
