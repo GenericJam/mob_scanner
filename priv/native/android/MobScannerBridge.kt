@@ -32,6 +32,8 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.ActivityResultRegistryOwner
@@ -172,8 +174,13 @@ object MobScannerBridge : io.mob.plugin.MobActivityAware {
         }
     }
 
-    // Registers a one-shot launcher, launches it, and unregisters it when the
-    // result arrives. A launch that throws (ActivityNotFoundException when the
+    // Registers a one-shot launcher, launches it, and unregisters it after the
+    // result has been dispatched. Unregistering inline from the callback would
+    // run inside ActivityResultRegistry.doDispatch, before the key leaves
+    // mLaunchedKeys, and unregister() then keeps the request-code/key mapping
+    // (it lingers in the registry and its saved state) — so the unregister is
+    // posted to run once dispatch has unwound. A launch that throws
+    // (ActivityNotFoundException when the
     // <activity> isn't in the host manifest, IllegalStateException, a
     // SecurityException, ...) is terminal for this scan, never for the app:
     // the launcher is unregistered, the cause goes to logcat, and the caller
@@ -202,7 +209,8 @@ object MobScannerBridge : io.mob.plugin.MobActivityAware {
         try {
             launcher =
                 owner.activityResultRegistry.register(key, contract) { output ->
-                    launcher?.unregister()
+                    val done = launcher
+                    Handler(Looper.getMainLooper()).post { done?.unregister() }
                     onResult(output)
                 }
             launcher.launch(input)
