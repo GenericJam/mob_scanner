@@ -6,7 +6,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ---
 
-## [Unreleased]
+## [0.1.5] - 2026-09-30
+
+### Behaviour change — screens must handle two more terminal messages
+
+`scan/2` can now end in `{:scan, :permission_denied}` on both platforms.
+Before, iOS showed a black preview until Cancel, which sent
+`{:scan, :cancelled}`, and Android ended in `{:scan, :cancelled}`. On
+Android it can also end in `{:scan, :not_available}`, where before a launch
+failure crashed the app. A screen that overrides `handle_info/2` with only
+`:result`/`:cancelled` clauses and no catch-all will now crash with
+`FunctionClauseError`, so add clauses for both (see the README). Android
+`scan/2` now shows the CAMERA permission dialog itself when the permission
+isn't granted.
 
 ### Fixed
 - **iOS: scanning before `:camera` was granted left a black preview until
@@ -26,11 +38,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
   rejected before anything is registered, with the same message.
 
 ### Changed
-- **New terminal messages screens should handle:** `{:scan, :permission_denied}`
-  (both platforms) and `{:scan, :not_available}` (now also on Android). Android
-  mirrors the iOS permission flow: if `android.permission.CAMERA` isn't granted,
-  `scan/2` requests it and opens the scanner on grant, or delivers
-  `{:scan, :permission_denied}` on refusal.
+- **Signed with mob_dev 0.7.3** (MOB-297). The signature now covers every
+  native build input, including the iOS `.m` NIF source this release changes.
+  It verifies on host mob_dev ≥ 0.7.2, and the coverage check is enforced on
+  ≥ 0.7.3.
 
 ## [0.1.4] - 2026-09-30
 
