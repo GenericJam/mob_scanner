@@ -1,4 +1,4 @@
-# AGENTS.md — orientation for AI agents working on mob_scanner
+# mob_scanner — Agent Instructions
 
 You're in **mob_scanner**, a Mob plugin whose only surface is a full-screen scanner view: `MobScanner.scan(socket)` opens the camera, the OS detects a QR / barcode, the view dismisses itself, and the result is delivered back to the calling screen as `handle_info({:scan, :result, %{type: _, value: _}}, socket)`. Extracted from mob core in Wave 3 of the plugin epic.
 
@@ -74,12 +74,15 @@ mix format
 mix credo --strict            # includes ExSlop + jump_credo_checks
 ```
 
-Pre-push hook (activated by `git config core.hooksPath .githooks`, or run `mix setup` after clone) adds format-check + credo strict + `mix compile --warnings-as-errors` on every push, and the full suite when `mix.exs` changes (release preflight).
+Native changes (`.m` / `.zig` / `.kt`) need `mix mob.deploy --native` of a host app (mob_plugin_demo) and a physical-device scan before committing (see Testing).
+
+Pre-push hook (`.githooks/pre-push`, activated by `git config core.hooksPath .githooks`, or run `mix setup` after clone) adds format-check + credo strict + `mix compile --warnings-as-errors` on every push, and the full suite when `mix.exs` changes (release preflight).
 
 ## Release flow
 
 Canonical process in [`~/code/mob/RELEASE.md`](../mob/RELEASE.md). mob_scanner specifics:
 
+* Do NOT bump versions without explicit permission.
 * `@version` in `mix.exs` is the trigger; pushing a bump to master fires `.github/workflows/release.yml` (tag + GH release + `hex.publish`, each step idempotent).
 * CI verifies `MOB_PLUGIN_SIGN_KEY` matches the committed `priv/mob_plugin.pub` before publish (see `8ba90c3`).
 * The `mob` floor pin in `mix.exs` is load-bearing; do not bump if this plugin starts using a new mob feature that hasn't shipped on Hex yet.
