@@ -19,8 +19,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
   through the method ID cached at `nativeRegister`; the bridge resolves the
   `MobScannerActivity` Intent against the host manifest and checks
   `FEATURE_CAMERA_ANY`, answering `:available`, `:no_camera`,
-  `{:error, :no_activity}` or `{:error, :activity_not_declared}`, and the NIF
-  answers `{:error, :bridge_not_registered}` when `register()` never ran.
+  `{:error, :no_activity}`, `{:error, :activity_not_declared}` or
+  `{:error, :query_failed}`, and the NIF answers
+  `{:error, :bridge_not_registered}` when `register()` never ran
+  (`{:error, :no_jni_env}` when it cannot attach to the JVM).
   `:available` passes, `:no_camera` is `{:skip, :needs_hardware}` (expected
   on the iOS Simulator), everything else fails. Run it with
   `mix mob.selftest` from a host app (mob_dev 0.7.17). Requires mob 0.9.15;

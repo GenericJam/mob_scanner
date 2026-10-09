@@ -30,7 +30,9 @@ defmodule MobScanner.SelfTest do
       method-ID lookup failed); `{:error, :no_activity}` (the bootstrap never
       called `setActivity`, a scan would only ever answer `:cancelled`);
       `{:error, :activity_not_declared}` (the manifest snippet was not spliced,
-      a scan would answer `:not_available`); anything else.
+      a scan would answer `:not_available`); `{:error, :query_failed}` (the
+      PackageManager query threw); `{:error, :no_jni_env}` (the NIF could not
+      attach to the JVM); anything else.
   """
   @behaviour Mob.Plugin.SelfTest
 
