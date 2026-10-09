@@ -19,12 +19,13 @@ A single-purpose scanning surface. `MobScanner.scan/2` calls into `:mob_scanner_
 ## Anatomy of the plugin
 
 * `lib/mob_scanner.ex` — the entire public API: `MobScanner.scan/2` + the `format` type. Delivered-message shapes are documented here canonically.
+* `lib/mob_scanner/self_test.ex` — `MobScanner.SelfTest` (`Mob.Plugin.SelfTest`, manifest `selftest:`), run by `mix mob.selftest`. Calls only `:mob_scanner_nif.scanner_available/0`, the side-effect-free NIF both platforms export for it (iOS: capture-device lookup; Android: `MobScannerBridge.scanner_available()` resolves the `MobScannerActivity` Intent and checks `FEATURE_CAMERA_ANY`; the zig NIF answers `{:error, :bridge_not_registered}` when `register()` never ran). Never call `scanner_scan/1` from it — that opens the camera UI.
 * `priv/mob_plugin.exs` — plugin manifest. `nifs` split by `platform:` (`:ios` compiles `.m` with `-fobjc-arc`, `:android` compiles the sibling `.zig`). No `:permissions` capability — that's mob_camera's. iOS `frameworks: ["AVFoundation"]`; Android `bridge_class: "io.mob.scanner.MobScannerBridge"` + CameraX / ML Kit `gradle_deps` kept in lockstep with mob_camera + the scanner `<activity>` via `manifest_application_snippets` (spliced into the host manifest by the native build). `host_requirements` prints the mob_camera reminder on every native build.
 * `priv/native/ios/mob_scanner_nif.m` — Objective-C NIF. Extracted from `mob-core ios/mob_nif.m:2939-3046`; ships its own `scan_send2` / `scan_root_vc` because core's equivalents are private statics.
 * `priv/native/jni/mob_scanner_nif.zig` — Zig NIF. Extracted from core's `mob_nif.zig` scanner paths; reaches ERTS / JNI via `@import("erts")` / `@import("jni")`, links against `get_jenv` / `g_jvm` exported from mob core into the same `.so`.
 * `priv/native/android/MobScannerBridge.kt` — Kotlin bridge. Registers directly on the ComponentActivity's `ActivityResultRegistry` (a late-bound plugin can't reference the generated `MainActivity`); launches `MobScannerActivity`; the pid travels through the closure, not through core's static `pendingScanPid`.
 * `MobScannerActivity` — the full-screen scanner Activity, a second top-level class in `MobScannerBridge.kt` (the bridge_kt channel copies one file per plugin). `AppCompatActivity` subclass (CameraX PreviewView + ML Kit want an AppCompat context).
-* `test/mob_scanner_test.exs` — Elixir suite. Manifest validation via `MobDev.Plugin.{Manifest, Validator}`.
+* `test/mob_scanner_test.exs` — Elixir suite. Manifest validation via `MobDev.Plugin.{Manifest, Validator}`. `test/mob_scanner/self_test_test.exs` covers every `SelfTest` branch with stub NIF modules.
 
 ## Cross-repo work
 

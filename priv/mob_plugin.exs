@@ -1,8 +1,11 @@
 %{
   name: :mob_scanner,
-  mob_version: "~> 0.6",
+  mob_version: "~> 0.9",
   plugin_spec_version: 1,
   description: "QR / barcode scanner — extracted from mob core in Wave 3",
+  # On-device proof for `mix mob.selftest` / mob_ci: the side-effect-free
+  # scanner_available/0 NIF, no scanner UI (see Mob.Plugin.SelfTest).
+  selftest: MobScanner.SelfTest,
   nifs: [
     # iOS: Objective-C NIF — AVCaptureMetadataOutput in a full-screen view
     # controller (MobScannerVC, extracted from core ios/mob_nif.m:2939-3046).

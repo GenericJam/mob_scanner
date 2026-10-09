@@ -92,6 +92,32 @@ object MobScannerBridge : io.mob.plugin.MobActivityAware {
 
     private val scanSeq = AtomicLong(0L)
 
+    // ── Readiness probe (MOB-418) ─────────────────────────────────────────
+    // Signature matches what the zig NIF calls: ()I. Side-effect free: no
+    // camera is opened, nothing is launched or registered. Answers the codes
+    // nif_scanner_available maps to atoms (0 is reserved: it is what the NIF
+    // sees when this method throws):
+    //   1 available, 2 no camera, 3 no Activity handed over by the bootstrap,
+    //   4 MobScannerActivity not declared in the host manifest (a scan would
+    //   end in {:scan, :not_available}), 5 the PackageManager query threw.
+    // Resolving the explicit Intent is the same lookup launch() does, so 1/2
+    // mean the manifest snippet was spliced into the host.
+    @JvmStatic
+    fun scanner_available(): Int {
+        val activity = activityRef?.get() ?: return 3
+        return try {
+            val pm = activity.packageManager
+            when {
+                Intent(activity, MobScannerActivity::class.java).resolveActivity(pm) == null -> 4
+                !pm.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY) -> 2
+                else -> 1
+            }
+        } catch (e: RuntimeException) {
+            Log.e(TAG, "scanner_available: PackageManager query failed", e)
+            5
+        }
+    }
+
     // ── Scan ──────────────────────────────────────────────────────────────
     // Signature matches what the zig NIF calls: (JLjava/lang/String;)V.
     // PARITY: formatsJson is accepted but ignored, exactly like core

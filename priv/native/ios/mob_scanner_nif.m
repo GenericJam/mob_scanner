@@ -202,12 +202,23 @@ static ERL_NIF_TERM nif_scanner_scan(ErlNifEnv *env, int argc, const ERL_NIF_TER
     return enif_make_atom(env, "ok");
 }
 
+// Side-effect-free readiness probe (MOB-418, the self-test's native call):
+// the same device lookup scan_present does, without opening an input,
+// prompting for permission or presenting anything. available -> a video
+// capture device exists; no_camera -> none (the iOS Simulator has none, so
+// a scan there ends in {scan, not_available}).
+static ERL_NIF_TERM nif_scanner_available(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
+    AVCaptureDevice *dev = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
+    return enif_make_atom(env, dev ? "available" : "no_camera");
+}
+
 // ── Registration ──────────────────────────────────────────────────────────
 // No load callback needed (unlike mob_camera, which registers a permission
 // handler at load) — the :camera permission flow is owned by mob_camera.
 
 static ErlNifFunc nif_funcs[] = {
     {"scanner_scan", 1, nif_scanner_scan, 0},
+    {"scanner_available", 0, nif_scanner_available, 0},
 };
 
 ERL_NIF_INIT(mob_scanner_nif, nif_funcs, NULL, NULL, NULL, NULL)

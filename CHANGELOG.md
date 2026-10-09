@@ -6,6 +6,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **On-device self-test** (MOB-418). `MobScanner.SelfTest` implements
+  `Mob.Plugin.SelfTest` and is declared in the manifest as `selftest:`.
+  It calls the new side-effect-free NIF `:mob_scanner_nif.scanner_available/0`
+  and never opens the scanner. iOS answers from
+  `AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo` (`:available`
+  or `:no_camera`). Android calls `MobScannerBridge.scanner_available()`
+  through the method ID cached at `nativeRegister`; the bridge resolves the
+  `MobScannerActivity` Intent against the host manifest and checks
+  `FEATURE_CAMERA_ANY`, answering `:available`, `:no_camera`,
+  `{:error, :no_activity}` or `{:error, :activity_not_declared}`, and the NIF
+  answers `{:error, :bridge_not_registered}` when `register()` never ran.
+  `:available` passes, `:no_camera` is `{:skip, :needs_hardware}` (expected
+  on the iOS Simulator), everything else fails. Run it with
+  `mix mob.selftest` from a host app (mob_dev 0.7.17). Requires mob 0.9.15;
+  `mob_version` in the manifest is now `~> 0.9`.
+
 ## [0.1.5] - 2026-09-30
 
 ### Behaviour change — screens must handle two more terminal messages
