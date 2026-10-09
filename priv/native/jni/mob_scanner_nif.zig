@@ -42,6 +42,7 @@ extern var g_jvm: ?*jni.JavaVM;
 // ── Plugin-owned bridge-class method-id cache ────────────────────────────
 const ScannerMethods = struct {
     scanner_scan: jni.JMethodID = null,
+    scanner_available: jni.JMethodID = null,
 };
 
 var g_scanner: ScannerMethods = .{};
@@ -51,7 +52,13 @@ var g_scanner_cls: jni.JClass = null;
 export fn Java_io_mob_scanner_MobScannerBridge_nativeRegister(jenv: *jni.JNIEnv, cls: jni.JClass) callconv(.c) void {
     g_scanner_cls = jni.newGlobalRef(jenv, cls);
     if (g_scanner_cls == null) return;
+    // A failed lookup leaves NoSuchMethodError pending, which would break the
+    // next JNI call and throw out of register(); the null method id is
+    // reported by scanner_available/0 instead (MOB-418).
     g_scanner.scanner_scan = jni.getStaticMethodID(jenv, cls, "scanner_scan", "(JLjava/lang/String;)V");
+    jni.exceptionClear(jenv);
+    g_scanner.scanner_available = jni.getStaticMethodID(jenv, cls, "scanner_available", "()I");
+    jni.exceptionClear(jenv);
 }
 
 // ── Thread-attach + pid round-trip helpers (mirror mob-core / camera) ─────
@@ -204,6 +211,44 @@ fn nif_scanner_scan(env: ?*erts.ErlNifEnv, argc: c_int, argv: [*]const erts.ERL_
     return callBridgePidStr(env, g_scanner.scanner_scan, pid, @ptrCast(&jbuf));
 }
 
+// scanner_available/0 — side-effect-free readiness probe (MOB-418, the
+// self-test's native call). Never opens the camera or launches anything:
+// MobScannerBridge.scanner_available() inspects the host Activity and its
+// PackageManager and answers a small code. 0 is never a Kotlin answer: it is
+// what CallStaticIntMethod returns when the method threw.
+//   1 -> available                       (Activity declared, a camera exists)
+//   2 -> no_camera                       (no FEATURE_CAMERA_ANY)
+//   3 -> {error, no_activity}            (bootstrap never called setActivity)
+//   4 -> {error, activity_not_declared}  (MobScannerActivity missing from the
+//                                         host manifest: scan would end in
+//                                         {:scan, :not_available})
+//   5 -> {error, query_failed}           (the PackageManager query threw)
+//   other -> {error, unexpected_bridge_answer}
+//   {error, bridge_not_registered}       nativeRegister never ran or the
+//                                         method-ID lookup failed
+fn nif_scanner_available(env: ?*erts.ErlNifEnv, argc: c_int, argv: [*]const erts.ERL_NIF_TERM) callconv(.c) erts.ERL_NIF_TERM {
+    _ = argc;
+    _ = argv;
+    if (g_scanner_cls == null or g_scanner.scanner_available == null) return scanError(env, "bridge_not_registered");
+    var attached: c_int = 0;
+    const jenv = get_jenv(&attached) orelse return scanError(env, "no_jni_env");
+    const code = jenv.*.CallStaticIntMethod.?(jenv, g_scanner_cls, g_scanner.scanner_available);
+    jni.exceptionClear(jenv);
+    detachIfAttached(attached);
+    return switch (code) {
+        1 => erts.atom(env, "available"),
+        2 => erts.atom(env, "no_camera"),
+        3 => scanError(env, "no_activity"),
+        4 => scanError(env, "activity_not_declared"),
+        5 => scanError(env, "query_failed"),
+        else => scanError(env, "unexpected_bridge_answer"),
+    };
+}
+
+fn scanError(env: ?*erts.ErlNifEnv, comptime reason: [:0]const u8) erts.ERL_NIF_TERM {
+    return erts.makeTuple(env, .{ erts.atom(env, "error"), erts.atom(env, reason) });
+}
+
 // ── NIF table + init entry point ─────────────────────────────────────────
 fn nifLoad(env: ?*erts.ErlNifEnv, priv: *?*anyopaque, info: erts.ERL_NIF_TERM) callconv(.c) c_int {
     _ = env;
@@ -214,6 +259,7 @@ fn nifLoad(env: ?*erts.ErlNifEnv, priv: *?*anyopaque, info: erts.ERL_NIF_TERM) c
 
 const nif_funcs = [_]erts.ErlNifFunc{
     .{ .name = "scanner_scan", .arity = 1, .fptr = nif_scanner_scan, .flags = 0 },
+    .{ .name = "scanner_available", .arity = 0, .fptr = nif_scanner_available, .flags = 0 },
 };
 
 var nif_entry: erts.ErlNifEntry = .{

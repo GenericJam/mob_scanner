@@ -9,7 +9,7 @@
 %% linked, so on_load tolerates the failure and the NIF falls back to
 %% nif_error until the native merge links one.
 -module(mob_scanner_nif).
--export([scanner_scan/1]).
+-export([scanner_scan/1, scanner_available/0]).
 -on_load(init/0).
 
 init() ->
@@ -19,4 +19,9 @@ init() ->
     end.
 
 scanner_scan(_FormatsJson) ->
+    erlang:nif_error(nif_not_loaded).
+
+%% Side-effect-free readiness probe (MOB-418): available | no_camera |
+%% {error, Reason}. Used by MobScanner.SelfTest; never opens the camera.
+scanner_available() ->
     erlang:nif_error(nif_not_loaded).

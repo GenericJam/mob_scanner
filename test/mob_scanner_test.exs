@@ -92,10 +92,10 @@ defmodule MobScannerTest do
 
     # Guards the .erl stub / manifest, not app code — VacuousTest can't see that.
     # credo:disable-for-next-line Jump.CredoChecks.VacuousTest
-    test "every NIF the public API calls is exported by the stub at the right arity" do
+    test "every NIF the public API and the self-test call is exported by the stub at the right arity" do
       exports = :mob_scanner_nif.module_info(:exports)
 
-      for fa <- [scanner_scan: 1] do
+      for fa <- [scanner_scan: 1, scanner_available: 0] do
         assert fa in exports, "#{inspect(fa)} missing from mob_scanner_nif exports"
       end
     end

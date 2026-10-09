@@ -51,6 +51,14 @@ None beyond activating `mob_camera` (above). The scanner `<activity>`
 host `AndroidManifest.xml` by `mix mob.deploy --native` (needs mob_dev ≥ 0.6.19).
 A hand-declared copy from an older setup is detected and not doubled.
 
+## Self-test
+
+`MobScanner.SelfTest` (declared as `selftest:` in the manifest) runs with
+`mix mob.selftest` from a host app that depends on mob_scanner (mob_dev ≥
+0.7.17). It never opens the scanner: it asks the side-effect-free
+`scanner_available/0` NIF and skips with `:needs_hardware` when the device
+has no camera (the iOS Simulator).
+
 ## Limits
 
 - The `formats:` option is currently ignored by both native sides (core
