@@ -6,13 +6,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ---
 
-## [Unreleased]
+## [0.1.6] - 2026-10-09
 
 ### Added
 
 - **On-device self-test** (MOB-418). `MobScanner.SelfTest` implements
   `Mob.Plugin.SelfTest` and is declared in the manifest as `selftest:`.
-  It calls the new side-effect-free NIF `:mob_scanner_nif.scanner_available/0`
+  It calls `:mob_scanner_nif.scanner_available/0`, a new side-effect-free
+  internal NIF (used by the self-test, not public API),
   and never opens the scanner. iOS answers from
   `AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo` (`:available`
   or `:no_camera`). Android calls `MobScannerBridge.scanner_available()`
@@ -20,13 +21,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
   `MobScannerActivity` Intent against the host manifest and checks
   `FEATURE_CAMERA_ANY`, answering `:available`, `:no_camera`,
   `{:error, :no_activity}`, `{:error, :activity_not_declared}` or
-  `{:error, :query_failed}`, and the NIF answers
+  `{:error, :query_failed}` (or `{:error, :unexpected_bridge_answer}` for
+  anything else), and the NIF answers
   `{:error, :bridge_not_registered}` when `register()` never ran
   (`{:error, :no_jni_env}` when it cannot attach to the JVM).
   `:available` passes, `:no_camera` is `{:skip, :needs_hardware}` (expected
   on the iOS Simulator), everything else fails. Run it with
-  `mix mob.selftest` from a host app (mob_dev 0.7.17). Requires mob 0.9.15;
-  `mob_version` in the manifest is now `~> 0.9`.
+  `mix mob.selftest` from a host app (mob_dev 0.7.17).
+
+### Changed
+- Requires mob >= 0.9.15 (was `~> 0.7`), for `Mob.Plugin.SelfTest`;
+  `mob_version` in the manifest is now `~> 0.9` (was `~> 0.6`).
 
 ## [0.1.5] - 2026-09-30
 
