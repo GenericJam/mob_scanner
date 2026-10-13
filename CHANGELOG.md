@@ -6,7 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ---
 
-## [Unreleased]
+## [0.1.7] - 2026-10-13
 
 ### Fixed
 - **Android: a scan before the bridge registers no longer aborts the VM**
