@@ -48,7 +48,7 @@ Native changes (`.m` / `.zig` / `.kt`) are **not** exercised by `mix test` — t
 
 Coverage priorities as issues land:
 * Plugin manifest loads + validates.
-* `MobScanner.scan/2` returns the socket unchanged (it's a side-effect call).
+* `MobScanner.scan/2` returns the socket unchanged (it's a side-effect call); a refused NIF call (`{:error, reason}`) is logged as a warning.
 * `formats` option is atom-normalised + JSON-encoded correctly (even though native currently ignores it — see below).
 
 ## The pre-empt-failure rules that matter here

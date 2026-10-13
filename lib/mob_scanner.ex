@@ -35,7 +35,17 @@ defmodule MobScanner do
   `BarcodeScanning` in a plugin-owned full-screen Activity
   (`io.mob.scanner.MobScannerActivity`), declared in the host manifest by
   the native build from this plugin's manifest.
+
+  ## When the native side refuses a call
+
+  `scan/2` keeps returning the socket. When the native side refuses the call
+  (on Android, `{:error, :bridge_not_registered}` when `MobScannerBridge`
+  never registered), it logs a warning naming the function and the reason,
+  and no `{:scan, …}` message follows. `mix mob.selftest` reports an
+  unregistered bridge before you get that far.
   """
+
+  require Logger
 
   @type format ::
           :qr
@@ -64,7 +74,16 @@ defmodule MobScanner do
   def scan(socket, opts \\ []) do
     formats = Keyword.get(opts, :formats, [:qr]) |> Enum.map(&Atom.to_string/1)
     formats_json = :json.encode(formats)
-    :mob_scanner_nif.scanner_scan(formats_json)
+    warn_on_error(nif().scanner_scan(formats_json), "scan/2")
     socket
   end
+
+  # The NIF module. Tests put a stub in the :mob_scanner app env.
+  defp nif, do: Application.get_env(:mob_scanner, :nif, :mob_scanner_nif)
+
+  defp warn_on_error({:error, reason}, function) do
+    Logger.warning("MobScanner.#{function}: the native side refused the call: #{inspect(reason)}")
+  end
+
+  defp warn_on_error(_answer, _function), do: :ok
 end
