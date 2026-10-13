@@ -13,7 +13,15 @@ defmodule MobScanner.RefusedCallTest do
   end
 
   setup do
-    on_exit(fn -> Application.delete_env(:mob_scanner, :nif) end)
+    previous = Application.fetch_env(:mob_scanner, :nif)
+
+    on_exit(fn ->
+      case previous do
+        {:ok, nif} -> Application.put_env(:mob_scanner, :nif, nif)
+        :error -> Application.delete_env(:mob_scanner, :nif)
+      end
+    end)
+
     %{socket: Mob.Socket.new(__MODULE__)}
   end
 
