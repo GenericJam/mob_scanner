@@ -6,6 +6,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **Android: a scan before the bridge registers no longer aborts the VM**
+  (MOB-424). `scanner_scan/1` called JNI through the cached
+  `MobScannerBridge` class and method ID without checking them, so a call
+  before `MobScannerBridge.register()` ran (or after a failed method-ID
+  lookup) crashed the app. It now answers `{:error, :bridge_not_registered}`
+  like `scanner_available/0` already did.
+- **`MobScanner.scan/2` logs a refused call.** It logs a warning naming the
+  function and the reason when the NIF answers `{:error, reason}`, instead of
+  dropping it. It still returns the socket.
+
 ## [0.1.6] - 2026-10-09
 
 ### Added

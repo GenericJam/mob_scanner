@@ -84,8 +84,11 @@ inline fn pidFromLong(jpid: jni.JLong) erts.ErlNifPid {
 }
 
 /// Call `MobScannerBridge.<method>(pid_long, arg)` — async; results land
-/// later via the deliver thunks. Returns :ok unconditionally.
+/// later via the deliver thunks. Returns :ok once the call is made, or
+/// {:error, :bridge_not_registered} when the bridge class or method ID was
+/// never cached (a call before MobScannerBridge registered).
 fn callBridgePidStr(env: ?*erts.ErlNifEnv, method: jni.JMethodID, pid: erts.ErlNifPid, arg: ?[*:0]const u8) erts.ERL_NIF_TERM {
+    if (g_scanner_cls == null or method == null) return scanError(env, "bridge_not_registered");
     var attached: c_int = 0;
     const jenv = get_jenv(&attached) orelse return erts.atom(env, "error");
     const jarg: jni.JString = if (arg) |a| jni.newStringUTF(jenv, a) else null;
