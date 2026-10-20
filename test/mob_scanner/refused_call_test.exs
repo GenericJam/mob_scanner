@@ -12,6 +12,10 @@ defmodule MobScanner.RefusedCallTest do
     def scanner_scan(_formats_json), do: :ok
   end
 
+  defmodule RecordingNif do
+    def scanner_scan(formats_json), do: send(self(), {:scanner_formats, formats_json})
+  end
+
   setup do
     previous = Application.fetch_env(:mob_scanner, :nif)
 
@@ -38,5 +42,13 @@ defmodule MobScanner.RefusedCallTest do
     Application.put_env(:mob_scanner, :nif, AcceptingNif)
 
     assert capture_log(fn -> assert MobScanner.scan(socket) == socket end) == ""
+  end
+
+  test "requested formats are atom-normalised and JSON-encoded for native", %{socket: socket} do
+    Application.put_env(:mob_scanner, :nif, RecordingNif)
+
+    assert MobScanner.scan(socket, formats: [:qr, :pdf417, :upce]) == socket
+    assert_receive {:scanner_formats, formats_json}
+    assert formats_json |> IO.iodata_to_binary() |> :json.decode() == ["qr", "pdf417", "upce"]
   end
 end

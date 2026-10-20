@@ -37,12 +37,22 @@ def handle_info({:scan, :cancelled}, socket), do: ...
 # camera access denied/restricted or refused at the prompt; nothing was shown
 def handle_info({:scan, :permission_denied}, socket), do: ...
 # the scanner couldn't open (iOS: no camera input; Android: activity launch
-# failed or the host Activity was going away — cause in logcat, MobScanner tag)
+# failed, invalid formats, oversized result, or the host Activity was going
+# away — cause in logcat, MobScanner tag)
 def handle_info({:scan, :not_available}, socket), do: ...
 ```
 
 Formats: `:qr`, `:ean13`, `:ean8`, `:code128`, `:code39`, `:upca`, `:upce`,
 `:pdf417`, `:aztec`, `:data_matrix`.
+
+On Android, `formats:` must be a non-empty list from that set. ML Kit is
+configured with exactly the requested formats (duplicates are ignored within
+the 16 KiB encoded JSON request limit); an empty, unsupported, or oversized
+request ends in `{:scan, :not_available}` without opening the scanner.
+Decoded Android values are limited to 16 KiB of UTF-8 and the type to 64 bytes
+before JSON serialization. An oversized result is rejected as `:not_available`,
+never truncated. iOS currently retains the extracted core behavior and
+recognizes its fixed native format set regardless of `formats:`.
 
 ## Host app requirements
 
@@ -58,13 +68,6 @@ A hand-declared copy from an older setup is detected and not doubled.
 0.7.17). It never opens the scanner: it asks the side-effect-free
 `scanner_available/0` NIF and skips with `:needs_hardware` when the device
 has no camera (the iOS Simulator).
-
-## Limits
-
-- The `formats:` option is currently ignored by both native sides (core
-  parity: iOS hardcodes its metadata object types, Android scans all ML Kit
-  formats). It's encoded and passed through, so honoring it later is a
-  non-breaking change.
 
 ## Development
 

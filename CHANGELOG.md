@@ -6,6 +6,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ---
 
+## Unreleased
+
+## [0.1.8] - 2026-10-19
+
+### Fixed
+
+- Android scan results now use the platform `org.json` serializer and explicit
+  UTF-8 bytes, preserving quotes, backslashes, controls, and Unicode through
+  the JNI/BEAM boundary. Decoded values over 16 KiB UTF-8 or types over 64
+  bytes are rejected with `{:scan, :not_available}` instead of being
+  serialized or truncated.
+- Android now configures ML Kit with the exact non-empty `formats:` request,
+  ignoring duplicates through the full 16 KiB JSON transport instead of
+  truncating them in JNI. Invalid, oversized, or unsupported requests end in
+  `{:scan, :not_available}` before the scanner opens.
+
 ## [0.1.7] - 2026-10-13
 
 ### Fixed

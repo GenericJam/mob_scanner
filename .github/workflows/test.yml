@@ -1,10 +1,8 @@
 name: tests
 
-# CI for the plugin's host-side Elixir surface — the same gate mob core runs,
-# so a PR gets a green check instead of relying only on each contributor's
-# local pre-push hook. Native code (zig/ObjC/Kotlin) is compiled by the host
-# app at deploy time, not here; the FFI-seam invariants are guarded by
-# source-level tests (see test/mob_camera_test.exs).
+# CI covers the Elixir surface and both changed Android native boundaries:
+# the Zig object/JNI exports and the complete Kotlin bridge against its real
+# CameraX/ML Kit dependencies.
 
 on:
   push:
@@ -36,6 +34,39 @@ jobs:
           elixir-version: ${{ matrix.elixir }}
           otp-version: ${{ matrix.otp }}
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android platform and wire-harness JSON sources
+        run: sdkmanager 'platforms;android-35' 'sources;android-35'
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.0-dev.269+ebff43698
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.2'
+
+      - name: Install Kotlin compiler for Android wire harness
+        run: |
+          curl --fail --location --silent --show-error \
+            https://github.com/JetBrains/kotlin/releases/download/v1.9.22/kotlin-compiler-1.9.22.zip \
+            --output "$RUNNER_TEMP/kotlin-compiler.zip"
+          unzip -q "$RUNNER_TEMP/kotlin-compiler.zip" -d "$RUNNER_TEMP/kotlin"
+          echo "$RUNNER_TEMP/kotlin/kotlinc/bin" >> "$GITHUB_PATH"
+
+      - name: Require Android wire harness prerequisites
+        run: |
+          test -d "$ANDROID_HOME/sources/android-35/org/json"
+          command -v kotlinc
+          command -v javac
+          command -v zig
+
       - name: Cache deps + _build
         uses: actions/cache@v4
         with:
@@ -55,5 +86,16 @@ jobs:
       - name: Credo (strict)
         run: mix credo --strict
 
-      - name: Tests
-        run: mix test --exclude macos_only --exclude requires_zig
+      - name: Tests, including Zig JNI compile/ABI
+        run: mix test --exclude macos_only
+
+      - name: Compile complete Android bridge
+        run: gradle -p test/android_compile :scanner:compileDebugKotlin --no-daemon
+
+      - name: Verify JNI ByteArray ABI on compiled bridge
+        shell: bash
+        run: |
+          bridge=test/android_compile/scanner/build/tmp/kotlin-classes/debug/io/mob/scanner/MobScannerBridge.class
+          test -f "$bridge"
+          abi="$(javap -s -classpath test/android_compile/scanner/build/tmp/kotlin-classes/debug io.mob.scanner.MobScannerBridge)"
+          [[ "$abi" == *'nativeDeliverScanResult(long, byte[]);'*'descriptor: (J[B)V'* ]]
