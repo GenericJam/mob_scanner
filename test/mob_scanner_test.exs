@@ -81,6 +81,22 @@ defmodule MobScannerTest do
       # contributed <activity> declaration to resolve.
       assert File.exists?(Path.join(@plugin_dir, "priv/native/android/MobScannerBridge.kt"))
     end
+
+    test "the manifest bridge is the only shipping Kotlin source that defines the scanner",
+         %{manifest: m} do
+      bridge = Path.expand(m.android.bridge_kt, @plugin_dir)
+
+      definitions =
+        @plugin_dir
+        |> Path.join("priv/**/*.kt*")
+        |> Path.wildcard()
+        |> Enum.filter(fn path ->
+          source = File.read!(path)
+          source =~ "object MobScannerBridge" or source =~ "class MobScannerActivity"
+        end)
+
+      assert definitions == [bridge]
+    end
   end
 
   describe "NIF stub agreement" do

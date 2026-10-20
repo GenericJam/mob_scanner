@@ -56,9 +56,87 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import java.util.concurrent.Executors
+import org.json.JSONArray
+import org.json.JSONException
+import org.json.JSONObject
+
+// TESTABLE_WIRE_START
+// Kept in the manifest's one shipping Kotlin source so the host build and the
+// JVM regression harness exercise the same serializer, limits, and format map.
+internal object ScannerWire {
+    const val MAX_VALUE_UTF8_BYTES = 16 * 1024
+    const val MAX_TYPE_UTF8_BYTES = 64
+    const val FORMATS_EXTRA = "mob_scanner_formats"
+
+    // Bound untrusted JNI input before JSON parsing. Duplicates inside this
+    // request-size limit are ignored rather than counting toward format count.
+    private const val MAX_FORMATS_JSON_CHARS = 16 * 1024
+
+    private val supportedFormats = linkedMapOf(
+        "qr" to Barcode.FORMAT_QR_CODE,
+        "ean13" to Barcode.FORMAT_EAN_13,
+        "ean8" to Barcode.FORMAT_EAN_8,
+        "code128" to Barcode.FORMAT_CODE_128,
+        "code39" to Barcode.FORMAT_CODE_39,
+        "upca" to Barcode.FORMAT_UPC_A,
+        "upce" to Barcode.FORMAT_UPC_E,
+        "pdf417" to Barcode.FORMAT_PDF417,
+        "aztec" to Barcode.FORMAT_AZTEC,
+        "data_matrix" to Barcode.FORMAT_DATA_MATRIX,
+    )
+
+    fun encodeResult(
+        value: String,
+        type: String,
+    ): ByteArray? {
+        if (!fitsUtf8(value, MAX_VALUE_UTF8_BYTES) || !fitsUtf8(type, MAX_TYPE_UTF8_BYTES)) {
+            return null
+        }
+
+        val item = JSONObject()
+            .put("type", type)
+            .put("value", value)
+        return JSONArray().put(item).toString().toByteArray(Charsets.UTF_8)
+    }
+
+    fun barcodeFormats(formatsJson: String): IntArray? {
+        if (formatsJson.length > MAX_FORMATS_JSON_CHARS) return null
+
+        val requested = try {
+            JSONArray(formatsJson)
+        } catch (_: JSONException) {
+            return null
+        }
+        if (requested.length() == 0) return null
+
+        val selected = linkedSetOf<Int>()
+        for (index in 0 until requested.length()) {
+            val name = requested.opt(index) as? String ?: return null
+            selected += supportedFormats[name] ?: return null
+        }
+        return selected.toIntArray()
+    }
+
+    fun scannerOptions(formats: IntArray): BarcodeScannerOptions? {
+        if (formats.isEmpty()) return null
+        return BarcodeScannerOptions.Builder()
+            .setBarcodeFormats(formats.first(), *formats.drop(1).toIntArray())
+            .build()
+    }
+
+    fun formatName(format: Int): String? =
+        supportedFormats.entries.firstOrNull { it.value == format }?.key
+
+    private fun fitsUtf8(
+        value: String,
+        limit: Int,
+    ): Boolean = value.length <= limit && value.toByteArray(Charsets.UTF_8).size <= limit
+}
+// TESTABLE_WIRE_END
 
 object MobScannerBridge : io.mob.plugin.MobActivityAware {
     private const val TAG = "MobScanner"
@@ -81,7 +159,7 @@ object MobScannerBridge : io.mob.plugin.MobActivityAware {
     // (lib/mob/screen.ex:382-384)
     @JvmStatic external fun nativeDeliverScanResult(
         pid: Long,
-        json: String,
+        jsonUtf8: ByteArray,
     )
 
     @JvmStatic fun register() = nativeRegister()
@@ -120,9 +198,9 @@ object MobScannerBridge : io.mob.plugin.MobActivityAware {
 
     // ── Scan ──────────────────────────────────────────────────────────────
     // Signature matches what the zig NIF calls: (JLjava/lang/String;)V.
-    // PARITY: formatsJson is accepted but ignored, exactly like core
-    // (MobBridge.kt.eex:1361-1365) — MobScannerActivity scans all ML Kit
-    // formats regardless.
+    // The requested list is decoded before any UI opens. Empty, malformed, or
+    // unsupported lists end in {:scan, :not_available}; valid names are
+    // de-duplicated in request order and become ML Kit's exact format set.
     //
     // Called on a BEAM scheduler thread. Everything past the activity lookup
     // hops to the UI thread: ActivityResultRegistry.register()/launch() belong
@@ -133,6 +211,12 @@ object MobScannerBridge : io.mob.plugin.MobActivityAware {
         pid: Long,
         formatsJson: String,
     ) {
+        val formats = ScannerWire.barcodeFormats(formatsJson)
+        if (formats == null) {
+            Log.w(TAG, "scan: invalid or unsupported formats, delivering {:scan, :not_available}")
+            nativeDeliverScanNotAvailable(pid)
+            return
+        }
         val activity =
             activityRef?.get() ?: run {
                 nativeDeliverScanCancelled(pid)
@@ -148,9 +232,9 @@ object MobScannerBridge : io.mob.plugin.MobActivityAware {
                 ContextCompat.checkSelfPermission(activity, Manifest.permission.CAMERA) ==
                     PackageManager.PERMISSION_GRANTED
             if (granted) {
-                launchScanner(activity, owner, pid)
+                launchScanner(activity, owner, pid, formats)
             } else {
-                requestCameraThenScan(activity, owner, pid)
+                requestCameraThenScan(activity, owner, pid, formats)
             }
         }
     }
@@ -162,6 +246,7 @@ object MobScannerBridge : io.mob.plugin.MobActivityAware {
         activity: Activity,
         owner: ActivityResultRegistryOwner,
         pid: Long,
+        formats: IntArray,
     ) {
         launchForResult(
             activity,
@@ -171,7 +256,7 @@ object MobScannerBridge : io.mob.plugin.MobActivityAware {
             Manifest.permission.CAMERA,
         ) { granted ->
             if (granted) {
-                launchScanner(activity, owner, pid)
+                launchScanner(activity, owner, pid, formats)
             } else {
                 Log.w(TAG, "scan: android.permission.CAMERA denied")
                 nativeDeliverScanPermissionDenied(pid)
@@ -183,13 +268,14 @@ object MobScannerBridge : io.mob.plugin.MobActivityAware {
         activity: Activity,
         owner: ActivityResultRegistryOwner,
         pid: Long,
+        formats: IntArray,
     ) {
         launchForResult(
             activity,
             owner,
             pid,
             ActivityResultContracts.StartActivityForResult(),
-            Intent(activity, MobScannerActivity::class.java),
+            Intent(activity, MobScannerActivity::class.java).putExtra(ScannerWire.FORMATS_EXTRA, formats),
         ) { result ->
             // Same extras contract as core (MainActivity.kt.eex:55-58):
             // MobScannerActivity returns scan_value/scan_type Intent
@@ -247,10 +333,10 @@ object MobScannerBridge : io.mob.plugin.MobActivityAware {
         }
     }
 
-    // Result processing copied from core MobBridge.handleScanResult
-    // (MobBridge.kt.eex:1368-1375): null value -> cancelled; otherwise a
-    // single-item JSON array [{"type","value"}] with quote escaping,
-    // delivered through the {:mob_file_result, ...} path.
+    // A null value is cancellation. Results are size-checked before Android's
+    // platform JSON implementation serializes them. Oversized values are not
+    // truncated or delivered as malformed partial results: they end in the
+    // API's controlled {:scan, :not_available} terminal state.
     internal fun handleScanResult(
         pid: Long,
         value: String?,
@@ -260,10 +346,17 @@ object MobScannerBridge : io.mob.plugin.MobActivityAware {
             nativeDeliverScanCancelled(pid)
             return
         }
-        val safeValue = value.replace("\"", "\\\"")
-        val safeType = (type ?: "qr").replace("\"", "\\\"")
-        val json = """[{"type":"$safeType","value":"$safeValue"}]"""
-        nativeDeliverScanResult(pid, json)
+        val jsonUtf8 = ScannerWire.encodeResult(value, type ?: "qr")
+        if (jsonUtf8 == null) {
+            Log.w(
+                TAG,
+                "scan: decoded result exceeds ${ScannerWire.MAX_VALUE_UTF8_BYTES}-byte value or " +
+                    "${ScannerWire.MAX_TYPE_UTF8_BYTES}-byte type limit; delivering {:scan, :not_available}",
+            )
+            nativeDeliverScanNotAvailable(pid)
+            return
+        }
+        nativeDeliverScanResult(pid, jsonUtf8)
     }
 }
 
@@ -274,12 +367,10 @@ object MobScannerBridge : io.mob.plugin.MobActivityAware {
 // manifest capability is the systemic alternative if a plugin ever
 // genuinely needs separate files.)
 //
-// Copied faithfully from the mob_new template
-// (priv/templates/mob.new/android/app/src/main/java/MobScannerActivity.kt.eex),
-// repackaged from the generated app package into the plugin-owned
-// io.mob.scanner. Launched by MobScannerBridge via an explicit Intent;
-// returns the scanned value/type as scan_value / scan_type Intent extras
-// (RESULT_OK) or RESULT_CANCELED.
+// This is the single authoritative shipping source; there is no second
+// activity template in this repo. MobScannerBridge launches it via an explicit
+// Intent; it returns the scanned value/type as scan_value / scan_type Intent
+// extras (RESULT_OK) or RESULT_CANCELED.
 //
 // The AndroidManifest declaration comes from this plugin's manifest
 // (android.manifest_application_snippets in priv/mob_plugin.exs), spliced
@@ -293,6 +384,16 @@ class MobScannerActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        val scannerOptions =
+            ScannerWire.scannerOptions(
+                intent.getIntArrayExtra(ScannerWire.FORMATS_EXTRA) ?: intArrayOf(),
+            ) ?: run {
+                Log.e("MobScanner", "scan: Activity received no valid format configuration")
+                setResult(Activity.RESULT_CANCELED)
+                finish()
+                return
+            }
 
         val container = FrameLayout(this)
         setContentView(container)
@@ -324,7 +425,7 @@ class MobScannerActivity : AppCompatActivity() {
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
                 .also { analysis ->
-                    val scanner = BarcodeScanning.getClient()
+                    val scanner = BarcodeScanning.getClient(scannerOptions)
                     analysis.setAnalyzer(executor) { imageProxy ->
                         @OptIn(ExperimentalGetImage::class)
                         val mediaImage = imageProxy.image
@@ -335,17 +436,7 @@ class MobScannerActivity : AppCompatActivity() {
                                     barcodes.firstOrNull()?.rawValue?.let { value ->
                                         if (!scanHandled) {
                                             scanHandled = true
-                                            val type = when (barcodes.first().format) {
-                                                Barcode.FORMAT_QR_CODE -> "qr"
-                                                Barcode.FORMAT_EAN_13 -> "ean13"
-                                                Barcode.FORMAT_EAN_8 -> "ean8"
-                                                Barcode.FORMAT_CODE_128 -> "code128"
-                                                Barcode.FORMAT_CODE_39 -> "code39"
-                                                Barcode.FORMAT_PDF417 -> "pdf417"
-                                                Barcode.FORMAT_AZTEC -> "aztec"
-                                                Barcode.FORMAT_DATA_MATRIX -> "data_matrix"
-                                                else -> "qr"
-                                            }
+                                            val type = ScannerWire.formatName(barcodes.first().format) ?: "qr"
                                             val result = Intent().apply {
                                                 putExtra("scan_value", value)
                                                 putExtra("scan_type", type)

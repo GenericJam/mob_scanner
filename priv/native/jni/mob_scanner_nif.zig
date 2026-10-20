@@ -153,64 +153,73 @@ export fn Java_io_mob_scanner_MobScannerBridge_nativeDeliverScanResult(
     jenv: *jni.JNIEnv,
     cls: jni.JClass,
     pid_long: jni.JLong,
-    json: jni.JString,
+    json_utf8: jni.JByteArray,
 ) callconv(.c) void {
     _ = cls;
     var pid = pidFromLong(pid_long);
     const env = erts.enif_alloc_env() orelse return;
     defer erts.enif_free_env(env);
 
-    const json_c = jenv.*.GetStringUTFChars.?(jenv, json, null) orelse return;
-    defer jenv.*.ReleaseStringUTFChars.?(jenv, json, json_c);
-
     const event = "scan";
     const sub = "result";
-    const jl = std.mem.len(json_c);
+    const json_len = jenv.*.GetArrayLength.?(jenv, json_utf8);
+    if (json_len < 0) return;
+    const jl: usize = @intCast(json_len);
 
     var eb: erts.ErlNifBinary = undefined;
-    var sb: erts.ErlNifBinary = undefined;
-    var jb: erts.ErlNifBinary = undefined;
     if (erts.enif_alloc_binary(event.len, &eb) == 0) return;
-    if (erts.enif_alloc_binary(sub.len, &sb) == 0) return;
-    if (erts.enif_alloc_binary(jl, &jb) == 0) return;
     @memcpy(eb.data[0..event.len], event);
+    const event_term = erts.enif_make_binary(env, &eb);
+
+    var sb: erts.ErlNifBinary = undefined;
+    if (erts.enif_alloc_binary(sub.len, &sb) == 0) return;
     @memcpy(sb.data[0..sub.len], sub);
-    @memcpy(jb.data[0..jl], json_c[0..jl]);
+    const sub_term = erts.enif_make_binary(env, &sb);
+
+    var jb: erts.ErlNifBinary = undefined;
+    if (erts.enif_alloc_binary(jl, &jb) == 0) return;
+    if (jl > 0) {
+        jni.getByteArrayRegion(jenv, json_utf8, 0, json_len, @ptrCast(jb.data));
+    }
+    const json_term = erts.enif_make_binary(env, &jb);
 
     const msg = erts.makeTuple(env, .{
         erts.atom(env, "mob_file_result"),
-        erts.enif_make_binary(env, &eb),
-        erts.enif_make_binary(env, &sb),
-        erts.enif_make_binary(env, &jb),
+        event_term,
+        sub_term,
+        json_term,
     });
     _ = erts.enif_send(null, &pid, env, msg);
 }
 
-// ── NIFs ──────────────────────────────────────────────────────────────────
-
-// Copy a binary/iolist arg into a null-terminated buffer. The bridge call
-// (newStringUTF) copies the jstring synchronously, so a stack buffer is fine.
-// (Same proven helper as mob_camera's binArgZ.)
-fn binArgZ(env: ?*erts.ErlNifEnv, term: erts.ERL_NIF_TERM, buf: []u8) bool {
-    var bin: erts.ErlNifBinary = undefined;
-    if (erts.enif_inspect_binary(env, term, &bin) == 0 and
-        erts.enif_inspect_iolist_as_binary(env, term, &bin) == 0) return false;
-    const n = @min(bin.size, buf.len - 1);
-    @memcpy(buf[0..n], bin.data[0..n]);
-    buf[n] = 0;
-    return true;
+// The JVM resolves a non-overloaded native method by name only. Keep the
+// result thunk's positional ABI checked by the Zig compiler as well as the
+// compiled Kotlin ByteArray descriptor checked by CI's javap step.
+comptime {
+    const ResultCallback = *const fn (*jni.JNIEnv, jni.JClass, jni.JLong, jni.JByteArray) callconv(.c) void;
+    const callback: ResultCallback = &Java_io_mob_scanner_MobScannerBridge_nativeDeliverScanResult;
+    _ = callback;
 }
 
-// PARITY: core's nif_scanner_scan (mob_nif.zig:2671-2683) passes the
-// formats-JSON binary through to the bridge unchanged; the Kotlin side
-// ignores it (core MobBridge.kt.eex:1361-1365 — the scanner activity scans
-// all ML Kit formats). Arity stays 1 to match the .erl stub.
+// ── NIFs ──────────────────────────────────────────────────────────────────
+
+// Kotlin accepts at most 16 KiB of formats JSON. Copy it to a bounded
+// null-terminated stack buffer for NewStringUTF, never silently truncate a
+// request into malformed JSON. Oversize input gets the scan failure event.
 fn nif_scanner_scan(env: ?*erts.ErlNifEnv, argc: c_int, argv: [*]const erts.ERL_NIF_TERM) callconv(.c) erts.ERL_NIF_TERM {
     _ = argc;
-    var jbuf: [1024]u8 = undefined;
-    if (!binArgZ(env, argv[0], &jbuf)) return erts.badarg(env);
+    var bin: erts.ErlNifBinary = undefined;
+    if (erts.enif_inspect_binary(env, argv[0], &bin) == 0 and
+        erts.enif_inspect_iolist_as_binary(env, argv[0], &bin) == 0) return erts.badarg(env);
     var pid: erts.ErlNifPid = undefined;
     _ = erts.enif_self(env, &pid);
+    if (bin.size > 16 * 1024) {
+        sendScanStatus(pidToJlong(pid), "not_available");
+        return erts.ok(env);
+    }
+    var jbuf: [16 * 1024 + 1]u8 = undefined;
+    @memcpy(jbuf[0..bin.size], bin.data[0..bin.size]);
+    jbuf[bin.size] = 0;
     return callBridgePidStr(env, g_scanner.scanner_scan, pid, @ptrCast(&jbuf));
 }
 

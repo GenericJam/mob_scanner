@@ -19,8 +19,9 @@ defmodule MobScanner do
       refused the prompt. Nothing is presented; send the user to Settings.
     * `:not_available` — the scanner could not open: iOS found no camera
       input; Android could not launch `MobScannerActivity`, or the host
-      Activity was finishing/destroyed/replaced by launch time (the cause is
-      logged to logcat under the `MobScanner` tag).
+      Activity was finishing/destroyed/replaced by launch time. Android also
+      uses it when the format request is invalid or a decoded result exceeds
+      its delivery limits. The cause is logged under the `MobScanner` tag.
 
   **Requires the mob_camera plugin for the `:camera` permission.** The
   `:camera` runtime-permission capability (its registry handler on iOS and
@@ -63,12 +64,17 @@ defmodule MobScanner do
   Open the barcode scanner.
 
   Options:
-    - `formats: [format]` — list of barcode formats to detect (default `[:qr]`)
+    - `formats: [format]` — non-empty list of barcode formats to detect
+      (default `[:qr]`). Android configures ML Kit with exactly this set;
+      duplicates are ignored within the 16 KiB encoded JSON request limit.
+      An empty list, unsupported value or oversized request ends in
+      `{:scan, :not_available}` without opening the scanner.
 
-  Core-parity note: both native sides currently ignore the formats list
-  (iOS hardcodes its `metadataObjectTypes`, ios/mob_nif.m:2966-2971; the
-  Android activity scans all ML Kit formats) — it is encoded and passed
-  through so honoring it later is a non-breaking change.
+  iOS currently retains the extracted core behavior: it recognizes its fixed
+  native set regardless of this option. Android scan results are delivered
+  only when their UTF-8 value is at most 16 KiB and type at most 64 bytes;
+  larger decoded results end in `{:scan, :not_available}` rather than being
+  truncated.
   """
   @spec scan(Mob.Socket.t(), keyword()) :: Mob.Socket.t()
   def scan(socket, opts \\ []) do
