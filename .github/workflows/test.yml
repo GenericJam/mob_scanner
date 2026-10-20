@@ -39,7 +39,7 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
 
       - name: Install Android platform and wire-harness JSON sources
         run: sdkmanager 'platforms;android-35' 'sources;android-35'
